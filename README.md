@@ -1,6 +1,8 @@
 # H801 LED WiFi Controller - Domoticz Python Plugin
 Python plugin for Domoticz to control H801 LED WiFi Controller with Tasmota firmware via MQTT
 
+![H801 Wifi Controller](H801.jpg)
+
 ## Prerequisites
 
 1. Setup any MQTT server ([Mosquitto](https://mosquitto.org/) as example)
