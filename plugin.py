@@ -1,5 +1,5 @@
 """
-<plugin key="TasmotaH801" name="H801 LED WiFi Controller with Tasmota firmware" version="0.0.1">
+<plugin key="TasmotaH801" name="H801 LED WiFi Controller with Tasmota firmware" version="0.0.2">
     <description>
       Plugin to control H801 LED WiFi Controlled with <a href="https://github.com/arendst/Sonoff-Tasmota">Tasmota</a> firmware<br/><br/>
       Specify MQTT server and port.<br/>
@@ -9,7 +9,9 @@
     <params>
         <param field="Address" label="MQTT Server address" width="300px" required="true" default="127.0.0.1"/>
         <param field="Port" label="Port" width="300px" required="true" default="1883"/>
-
+        <param field="Username" label="MQTT Username (optional)" width="300px" required="false" default=""/>
+        <param field="Password" label="MQTT Password (optional)" width="300px" required="false" default="" password="true"/>
+        <param field="Mode3" label="MQTT Client ID (optional)" width="300px" required="false" default=""/>
         <param field="Mode1" label="Device Topic" width="300px" default="sonoff"/>
         <param field="Mode2" label="Device Type" width="300px">
             <options>
@@ -46,8 +48,13 @@ class Dimmer:
     def onMqttMessage(self, topic, payload):
         for unit, level in enumerate(payload["Channel"], start=1):
             Domoticz.Debug("Unit {}: {}".format(unit, level))
-            nValue = 1 if level > 0 else 0
-            Devices[unit].Update(nValue=nValue, sValue=str(level))
+
+            device = Devices[unit]
+            n_value = 1 if level > 0 else 0
+            s_value = str(level)
+
+            if device.nValue != n_value or device.sValue != s_value:
+                device.Update(nValue=n_value, sValue=s_value)
 
     def onCommand(self, mqttClient, unit, command, level, color):
         topic = "cmnd/" + Parameters["Mode1"] + "/Channel" + str(unit)
@@ -87,10 +94,14 @@ class ColorDimmer:
             Domoticz.Device(Name=self.name, Unit=1, Type=self.deviceType, Subtype=self.deviceSubType, Switchtype=7).Create()
 
     def onMqttMessage(self, topic, payload):
+        device = Devices[1]
+
         if ("Color" not in payload) or ("Dimmer" not in payload):
-            if ("POWER" in payload):
+            if "POWER" in payload:
                 nValue = 1 if payload["POWER"] == "ON" else 0
-                Devices[1].Update(nValue=nValue, sValue=Devices[1].sValue)
+
+                if device.nValue != nValue:
+                    device.Update(nValue=nValue, sValue=device.sValue)
 
             return
 
@@ -106,8 +117,10 @@ class ColorDimmer:
         color["b"] = int(colors[2] * 255 / 100)
         color["cw"] = int(colors[3] * 255 / 100) if self.channelsCount == 4 else 0
         color["ww"] = int(colors[4] * 255 / 100) if self.channelsCount == 5 else 0
+        color = json.dumps(color)
 
-        Devices[1].Update(nValue=nValue, sValue=sValue, Color=json.dumps(color))
+        if (device.nValue != nValue or device.sValue != sValue or device.Color != color):
+            device.Update(nValue=nValue, sValue=sValue, Color=color)
 
     def onCommand(self, mqttClient, unit, command, level, sColor):
         topic = "cmnd/" + Parameters["Mode1"] + "/Power"
@@ -165,9 +178,11 @@ class BasePlugin:
         self.controller.checkDevices()
 
         self.topics = list(["stat/" + Parameters["Mode1"] + "/RESULT", "tele/" + Parameters["Mode1"] + "/STATE"])
-        self.mqttserveraddress = Parameters["Address"].replace(" ", "")
-        self.mqttserverport = Parameters["Port"].replace(" ", "")
-        self.mqttClient = MqttClient(self.mqttserveraddress, self.mqttserverport, self.onMQTTConnected, self.onMQTTDisconnected, self.onMQTTPublish, self.onMQTTSubscribed)
+        
+        mqtt_server_address = Parameters["Address"].strip()
+        mqtt_server_port = Parameters["Port"].strip()
+        mqtt_client_id = Parameters["Mode3"].strip()
+        self.mqttClient = MqttClient(mqtt_server_address, mqtt_server_port, mqtt_client_id, self.onMQTTConnected, self.onMQTTDisconnected, self.onMQTTPublish, self.onMQTTSubscribed)
 
     def checkDevices(self):
         Domoticz.Log("checkDevices called")
@@ -189,14 +204,7 @@ class BasePlugin:
         self.mqttClient.onMessage(Connection, Data)
 
     def onHeartbeat(self):
-        Domoticz.Debug("Heartbeating...")
-
-        # Reconnect if connection has dropped
-        if self.mqttClient.mqttConn is None or (not self.mqttClient.mqttConn.Connecting() and not self.mqttClient.mqttConn.Connected() or not self.mqttClient.isConnected):
-            Domoticz.Debug("Reconnecting")
-            self.mqttClient.Open()
-        else:
-            self.mqttClient.Ping()
+        self.mqttClient.onHeartbeat()
 
     def onMQTTConnected(self):
         Domoticz.Debug("onMQTTConnected")
@@ -208,14 +216,8 @@ class BasePlugin:
     def onMQTTSubscribed(self):
         Domoticz.Debug("onMQTTSubscribed")
 
-    def onMQTTPublish(self, topic, rawmessage):
-        Domoticz.Debug("MQTT message: " + topic + " " + str(rawmessage))
-
-        message = ""
-        try:
-            message = json.loads(rawmessage.decode('utf8'))
-        except ValueError:
-            message = rawmessage.decode('utf8')
+    def onMQTTPublish(self, topic, message):
+        Domoticz.Debug("MQTT message: " + topic + " " + str(message))
 
         if (topic in self.topics):
             self.controller.onMqttMessage(topic, message)
