@@ -1,5 +1,5 @@
 """
-<plugin key="TasmotaH801" name="H801 LED WiFi Controller with Tasmota firmware" version="0.0.2">
+<plugin key="TasmotaH801" name="H801 LED WiFi Controller with Tasmota firmware" version="0.0.3">
     <description>
       Plugin to control H801 LED WiFi Controlled with <a href="https://github.com/arendst/Sonoff-Tasmota">Tasmota</a> firmware<br/><br/>
       Specify MQTT server and port.<br/>
@@ -117,10 +117,13 @@ class ColorDimmer:
         color["b"] = int(colors[2] * 255 / 100)
         color["cw"] = int(colors[3] * 255 / 100) if self.channelsCount == 4 else 0
         color["ww"] = int(colors[4] * 255 / 100) if self.channelsCount == 5 else 0
-        color = json.dumps(color)
 
         if (device.nValue != nValue or device.sValue != sValue or device.Color != color):
-            device.Update(nValue=nValue, sValue=sValue, Color=color)
+            Domoticz.Debug('Updating device #' + str(device.ID))
+            Domoticz.Debug('nValue: ' + str(device.nValue) + ' -> ' + str(nValue))
+            Domoticz.Debug('sValue: ' + device.sValue + ' -> ' + sValue)
+            Domoticz.Debug('Color: ' + device.Color + ' -> ' + color)
+            device.Update(nValue=nValue, sValue=sValue, Color=json.dumps(color))
 
     def onCommand(self, mqttClient, unit, command, level, sColor):
         topic = "cmnd/" + Parameters["Mode1"] + "/Power"
