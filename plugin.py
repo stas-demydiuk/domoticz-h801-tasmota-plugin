@@ -119,11 +119,12 @@ class ColorDimmer:
         color["ww"] = int(colors[4] * 255 / 100) if self.channelsCount == 5 else 0
 
         if (device.nValue != nValue or device.sValue != sValue or device.Color != color):
+            sColor = json.dumps(color)
             Domoticz.Debug('Updating device #' + str(device.ID))
             Domoticz.Debug('nValue: ' + str(device.nValue) + ' -> ' + str(nValue))
             Domoticz.Debug('sValue: ' + device.sValue + ' -> ' + sValue)
-            Domoticz.Debug('Color: ' + device.Color + ' -> ' + color)
-            device.Update(nValue=nValue, sValue=sValue, Color=json.dumps(color))
+            Domoticz.Debug('Color: ' + device.Color + ' -> ' + sColor)
+            device.Update(nValue=nValue, sValue=sValue, Color=sColor)
 
     def onCommand(self, mqttClient, unit, command, level, sColor):
         topic = "cmnd/" + Parameters["Mode1"] + "/Power"
