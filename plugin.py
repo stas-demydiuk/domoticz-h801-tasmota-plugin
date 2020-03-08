@@ -1,5 +1,5 @@
 """
-<plugin key="TasmotaH801" name="H801 LED WiFi Controller with Tasmota firmware" version="0.0.4">
+<plugin key="TasmotaH801" name="H801 LED WiFi Controller with Tasmota firmware" version="0.0.5">
     <description>
       Plugin to control H801 LED WiFi Controlled with <a href="https://github.com/arendst/Sonoff-Tasmota">Tasmota</a> firmware<br/><br/>
       Specify MQTT server and port.<br/>
@@ -46,6 +46,9 @@ class Dimmer:
                 Domoticz.Device(Name="Channel #" + str(unit), Unit=unit, Type=244, Subtype=73, Switchtype=7).Create()
 
     def onMqttMessage(self, topic, payload):
+        if "Channel" not in payload:
+            return
+
         for unit, level in enumerate(payload["Channel"], start=1):
             Domoticz.Debug("Unit {}: {}".format(unit, level))
 
