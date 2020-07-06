@@ -1,5 +1,5 @@
 """
-<plugin key="TasmotaH801" name="H801 LED WiFi Controller with Tasmota firmware" version="0.0.5">
+<plugin key="TasmotaH801" name="H801 LED WiFi Controller with Tasmota firmware" version="0.1.0">
     <description>
       Plugin to control H801 LED WiFi Controlled with <a href="https://github.com/arendst/Sonoff-Tasmota">Tasmota</a> firmware<br/><br/>
       Specify MQTT server and port.<br/>
@@ -19,6 +19,7 @@
                 <option label="RGBW" value="RGBW"/>
                 <option label="RGBWW" value="RGBWW"/>
                 <option label="Dimmer (5x)" value="Dimmer" />
+                <option label="Dimmer (5x) with Option68" value="PwmDimmer" />
             </options>
         </param>
 
@@ -37,128 +38,11 @@ import Domoticz
 import json
 import time
 from mqtt import MqttClient
+from devices_manager import DevicesManager
+from controllers.dimmer import Dimmer
+from controllers.color_dimmer import ColorDimmer
+from controllers.pwm_dimmer import PwmDimmer
 
-class Dimmer:
-    def checkDevices(self):
-        for unit in range(1, 6):
-            if unit not in Devices:
-                Domoticz.Debug("Create Dimmer Device #" + str(unit))
-                Domoticz.Device(Name="Channel #" + str(unit), Unit=unit, Type=244, Subtype=73, Switchtype=7).Create()
-
-    def onMqttMessage(self, topic, payload):
-        if "Channel" not in payload:
-            return
-
-        for unit, level in enumerate(payload["Channel"], start=1):
-            Domoticz.Debug("Unit {}: {}".format(unit, level))
-
-            device = Devices[unit]
-            n_value = 1 if level > 0 else 0
-            s_value = str(level)
-
-            if device.nValue != n_value or device.sValue != s_value:
-                device.Update(nValue=n_value, sValue=s_value)
-
-    def onCommand(self, mqttClient, unit, command, level, color):
-        topic = "cmnd/" + Parameters["Mode1"] + "/Channel" + str(unit)
-
-        if (command == "Off"):
-            mqttClient.Publish(topic, "0")
-        elif (command == "On"): 
-            mqttClient.Publish(topic, str(level))
-        elif (command == "Set Level"):
-            mqttClient.Publish(topic, str(level))
-
-class ColorDimmer:
-    def __init__(self, channelsCount):
-        self.channelsCount = channelsCount
-        self.deviceType = 0xf1 # pTypeColorSwitch
-        
-        if (channelsCount == 3):
-            self.name = 'RGB'
-            self.deviceSubType = 0x02 # sTypeColor_RGB
-            self.colorMode = 3        # ColorModeRGB
-        elif (channelsCount == 4):    
-            self.name = 'RGBW'
-            self.deviceSubType = 0x06 # sTypeColor_RGB_W_Z
-            self.colorMode = 4        # ColorModeCustom
-        elif (channelsCount == 5):
-            self.name = 'RGBWW'
-            self.deviceSubType = 0x07 # sTypeColor_RGB_CW_WW_Z
-            self.colorMode = 4        # ColorModeCustom
-
-    def checkDevices(self):
-        if 1 in Devices and (Devices[1].Type != self.deviceType or Devices[1].SubType != self.deviceSubType):
-             Domoticz.Debug("Remove unappropriate device #1")
-             Devices[1].Delete()
-
-        if 1 not in Devices:
-            Domoticz.Debug("Create " + self.name + " Device")
-            Domoticz.Device(Name=self.name, Unit=1, Type=self.deviceType, Subtype=self.deviceSubType, Switchtype=7).Create()
-
-    def onMqttMessage(self, topic, payload):
-        device = Devices[1]
-
-        if ("Color" not in payload) or ("Dimmer" not in payload):
-            if "POWER" in payload:
-                nValue = 1 if payload["POWER"] == "ON" else 0
-
-                if device.nValue != nValue:
-                    device.Update(nValue=nValue, sValue=device.sValue)
-
-            return
-
-        colors = payload["Channel"]
-        nValue = 1 if payload["POWER"] == "ON" else 0
-        sValue = str(payload["Dimmer"])
-
-        color = {}
-        color["m"] = self.colorMode
-        color["t"] = 0
-        color["r"] = int(colors[0] * 255 / 100)
-        color["g"] = int(colors[1] * 255 / 100)
-        color["b"] = int(colors[2] * 255 / 100)
-        color["cw"] = int(colors[3] * 255 / 100) if self.channelsCount == 4 else 0
-        color["ww"] = int(colors[4] * 255 / 100) if self.channelsCount == 5 else 0
-
-        if (device.nValue != nValue or device.sValue != sValue or json.loads(device.Color) != color):
-            sColor = json.dumps(color)
-            Domoticz.Debug('Updating device #' + str(device.ID))
-            Domoticz.Debug('nValue: ' + str(device.nValue) + ' -> ' + str(nValue))
-            Domoticz.Debug('sValue: ' + device.sValue + ' -> ' + sValue)
-            Domoticz.Debug('Color: ' + device.Color + ' -> ' + sColor)
-            device.Update(nValue=nValue, sValue=sValue, Color=sColor)
-
-    def onCommand(self, mqttClient, unit, command, level, sColor):
-        topic = "cmnd/" + Parameters["Mode1"] + "/Power"
-
-        if (command == "Off"):
-            mqttClient.Publish(topic, "Off")
-        elif (command == "On"): 
-            mqttClient.Publish(topic, "On")
-        elif (command == "Set Level"):
-            mqttClient.Publish("cmnd/" + Parameters["Mode1"] + "/Dimmer", str(level))
-        elif (command == "Set Color"):
-            try:
-                color = json.loads(sColor)
-            except (ValueError, KeyError, TypeError) as e:
-                Domoticz.Error("onCommand: Illegal color: '" + str(sColor) + "'")
-
-            r = format(int(color["r"] * level / 100), '02X')
-            g = format(int(color["g"] * level / 100), '02X')
-            b = format(int(color["b"] * level / 100), '02X')
-            colors = [r, g, b]
-
-            if (self.channelsCount >= 4):
-                w1 = format(int(color["cw"] * level / 100), '02X')
-                colors.append(w1)
-
-            if (self.channelsCount == 5):
-                w2 = format(int(color["ww"] * level / 100), '02X')
-                colors.append(w2)
-
-            Domoticz.Debug('Set Color:' + json.dumps(colors))
-            mqttClient.Publish("cmnd/" + Parameters["Mode1"] + "/Color", ''.join(colors))
 
 class BasePlugin:
     mqttClient = None
@@ -173,18 +57,24 @@ class BasePlugin:
         if self.debugging == "Debug":
             Domoticz.Debugging(2+4+8)
 
+        self.devices_manager = DevicesManager()
+        self.devices_manager.set_devices(Devices)
+        device_topic = Parameters["Mode1"].strip()
+
         if (Parameters["Mode2"] == "Dimmer"):
-            self.controller = Dimmer()
+            self.controller = Dimmer(self.devices_manager, device_topic)
+        elif (Parameters["Mode2"] == "PwmDimmer"):
+            self.controller = PwmDimmer(self.devices_manager, device_topic)
         elif (Parameters["Mode2"] == "RGB"):
-            self.controller = ColorDimmer(3)
+            self.controller = ColorDimmer(self.devices_manager, device_topic, 3)
         elif (Parameters["Mode2"] == "RGBW"):
-            self.controller = ColorDimmer(4)
+            self.controller = ColorDimmer(self.devices_manager, device_topic, 4)
         elif (Parameters["Mode2"] == "RGBWW"):
-            self.controller = ColorDimmer(5)
+            self.controller = ColorDimmer(self.devices_manager, device_topic, 5)
 
         self.controller.checkDevices()
 
-        self.topics = list(["stat/" + Parameters["Mode1"] + "/RESULT", "tele/" + Parameters["Mode1"] + "/STATE"])
+        self.topics = list(["stat/" + device_topic + "/RESULT", "tele/" + device_topic + "/STATE"])
         
         mqtt_server_address = Parameters["Address"].strip()
         mqtt_server_port = Parameters["Port"].strip()
@@ -215,7 +105,7 @@ class BasePlugin:
 
     def onMQTTConnected(self):
         Domoticz.Debug("onMQTTConnected")
-        self.mqttClient.Subscribe(self.topics)
+        self.mqttClient.subscribe(self.topics)
 
     def onMQTTDisconnected(self):
         Domoticz.Debug("onMQTTDisconnected")
